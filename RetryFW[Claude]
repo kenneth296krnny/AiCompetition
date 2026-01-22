@@ -1,0 +1,1154 @@
+--[[
+    PROJECT: AERO RESPAWN (v1.0 - GLASS FUSION)
+    Architecture: Monolithic Modular with Glass Depth
+    Style: Windows 8.1 Beta (Metro + Aero) for Mobile
+    
+    DESIGN PHILOSOPHY:
+    - Metro clean structure from Respawn
+    - Aero glass depth and translucency
+    - Mobile-first touch interactions
+    - Sidebar navigation with collapse
+    - Live theme system
+    
+    CREDITS:
+    - Base Framework: Respawn by Gemini
+    - Glass Design: Windows 8.1 Beta aesthetic
+    - Icons: Lucide (Auto-fetched)
+]]
+
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local Players = game:GetService("Players")
+
+local AeroRespawn = {}
+AeroRespawn.__index = AeroRespawn
+
+--// 1.0 SIGNAL CLASS
+local Signal = {}
+Signal.__index = Signal
+
+function Signal.new()
+    return setmetatable({_listeners = {}}, Signal)
+end
+
+function Signal:Connect(callback)
+    local listener = {callback = callback, disconnected = false}
+    table.insert(self._listeners, listener)
+    return {
+        Disconnect = function()
+            listener.disconnected = true
+            listener.callback = nil
+        end
+    }
+end
+
+function Signal:Fire(...)
+    for _, listener in ipairs(self._listeners) do
+        if not listener.disconnected then
+            task.spawn(listener.callback, ...)
+        end
+    end
+end
+
+--// 2.0 THEME SYSTEM (Windows 8.1 Beta Glass)
+local Theme = {
+    -- Mode: "dark" or "light"
+    mode = "dark",
+    
+    -- Dark mode palette
+    dark = {
+        -- Background layers
+        background = Color3.fromRGB(20, 20, 20),
+        backgroundSecondary = Color3.fromRGB(30, 30, 30),
+        
+        -- Glass surfaces
+        surface = Color3.fromRGB(40, 40, 40),
+        surfaceLight = Color3.fromRGB(50, 50, 50),
+        surfaceHighlight = Color3.fromRGB(60, 60, 60),
+        
+        -- Sidebar (darker glass)
+        sidebar = Color3.fromRGB(25, 25, 25),
+        sidebarGlass = Color3.fromRGB(35, 35, 35),
+        
+        -- Text
+        textPrimary = Color3.fromRGB(255, 255, 255),
+        textSecondary = Color3.fromRGB(200, 200, 200),
+        textDisabled = Color3.fromRGB(120, 120, 120),
+        
+        -- Borders
+        border = Color3.fromRGB(80, 80, 80),
+        divider = Color3.fromRGB(60, 60, 60),
+        
+        -- Glass transparency values
+        glassTransparency = 0.2,
+        glassHighlight = 0.15,
+        glassDeep = 0.3,
+    },
+    
+    -- Light mode palette
+    light = {
+        background = Color3.fromRGB(245, 245, 245),
+        backgroundSecondary = Color3.fromRGB(235, 235, 235),
+        surface = Color3.fromRGB(250, 250, 250),
+        surfaceLight = Color3.fromRGB(255, 255, 255),
+        surfaceHighlight = Color3.fromRGB(240, 240, 240),
+        sidebar = Color3.fromRGB(240, 240, 240),
+        sidebarGlass = Color3.fromRGB(250, 250, 250),
+        textPrimary = Color3.fromRGB(20, 20, 20),
+        textSecondary = Color3.fromRGB(80, 80, 80),
+        textDisabled = Color3.fromRGB(160, 160, 160),
+        border = Color3.fromRGB(200, 200, 200),
+        divider = Color3.fromRGB(220, 220, 220),
+        glassTransparency = 0.15,
+        glassHighlight = 0.1,
+        glassDeep = 0.25,
+    },
+    
+    -- Accent color (customizable)
+    accent = Color3.fromRGB(0, 120, 215), -- Windows blue
+    accentLight = Color3.fromRGB(30, 140, 235),
+    accentDark = Color3.fromRGB(0, 100, 195),
+    accentSubtle = Color3.fromRGB(100, 160, 220),
+    
+    -- Status colors
+    success = Color3.fromRGB(100, 255, 100),
+    warning = Color3.fromRGB(255, 200, 50),
+    error = Color3.fromRGB(255, 80, 80),
+}
+
+function Theme:Get(key)
+    local palette = self[self.mode]
+    if palette[key] then
+        return palette[key]
+    elseif self[key] then
+        return self[key]
+    end
+    return Color3.new(1, 1, 1)
+end
+
+function Theme:SetMode(mode)
+    if mode == "dark" or mode == "light" then
+        self.mode = mode
+    end
+end
+
+function Theme:SetAccent(color)
+    self.accent = color
+    -- Auto-generate variations
+    local h, s, v = color:ToHSV()
+    self.accentLight = Color3.fromHSV(h, s * 0.8, math.min(v * 1.2, 1))
+    self.accentDark = Color3.fromHSV(h, s, v * 0.8)
+    self.accentSubtle = Color3.fromHSV(h, s * 0.5, math.min(v * 1.1, 1))
+end
+
+--// 3.0 CONFIGURATION
+local Config = {
+    Name = "AeroRespawn",
+    Version = "1.0",
+    
+    -- Sidebar
+    SidebarExpandedWidth = 280,
+    SidebarCollapsedWidth = 72,
+    TabHeight = 64,
+    
+    -- Animation
+    AnimationDuration = 0.25,
+    AnimationEasing = Enum.EasingStyle.Quad,
+    AnimationDirection = Enum.EasingDirection.Out,
+    
+    -- Sizes (mobile-optimized)
+    MinTouchTarget = 48,
+    Spacing = {
+        tiny = 4,
+        small = 8,
+        medium = 16,
+        large = 24,
+        xlarge = 32,
+    },
+    
+    -- Typography
+    FontFamily = Enum.Font.GothamMedium,
+    FontSizes = {
+        caption = 12,
+        body = 14,
+        subtitle = 16,
+        title = 20,
+        header = 24,
+    },
+}
+
+--// 4.0 UTILITY LIBRARY
+local Utility = {}
+
+function Utility.Create(class, properties, children)
+    local inst = Instance.new(class)
+    for k, v in pairs(properties or {}) do
+        inst[k] = v
+    end
+    for _, child in ipairs(children or {}) do
+        child.Parent = inst
+    end
+    return inst
+end
+
+function Utility.Tween(inst, props, duration, easing)
+    local tweenInfo = TweenInfo.new(
+        duration or Config.AnimationDuration,
+        easing or Config.AnimationEasing,
+        Config.AnimationDirection
+    )
+    local tween = TweenService:Create(inst, tweenInfo, props)
+    tween:Play()
+    return tween
+end
+
+-- Glass panel factory
+function Utility.CreateGlassPanel(parent, depth)
+    depth = depth or "surface"
+    
+    local panel = Utility.Create("Frame", {
+        Parent = parent,
+        BackgroundColor3 = Theme:Get(depth),
+        BackgroundTransparency = Theme:Get("glassTransparency"),
+        BorderSizePixel = 0,
+    })
+    
+    -- Subtle border
+    Utility.Create("UIStroke", {
+        Parent = panel,
+        Color = Theme:Get("border"),
+        Transparency = 0.5,
+        Thickness = 1,
+    })
+    
+    -- Glass reflection gradient
+    Utility.Create("UIGradient", {
+        Parent = panel,
+        Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.new(1, 1, 1)),
+            ColorSequenceKeypoint.new(1, Color3.new(0.9, 0.9, 0.9)),
+        }),
+        Rotation = 90,
+        Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0.95),
+            NumberSequenceKeypoint.new(1, 0.98),
+        }),
+    })
+    
+    return panel
+end
+
+-- Icon loader (from Respawn)
+function Utility.GetIcon(iconName)
+    if string.find(iconName, "rbxassetid://") or string.find(iconName, "http") then
+        return iconName
+    end
+    
+    if not makefolder or not writefile or not getcustomasset then
+        warn("[AeroRespawn] Executor lacks file system. Using fallback icon.")
+        return "rbxassetid://3926305904"
+    end
+
+    local fileName = iconName .. ".png"
+    local folderPath = "AeroRespawnIcons"
+    local filePath = folderPath .. "/" .. fileName
+    local githubUrl = "https://raw.githubusercontent.com/latte-soft/lucide-roblox/master/icons/compiled/48px/" .. fileName
+    
+    if not isfolder(folderPath) then
+        makefolder(folderPath)
+    end
+    
+    if not isfile(filePath) then
+        local success, response = pcall(function()
+            return game:HttpGet(githubUrl)
+        end)
+        if success then
+            writefile(filePath, response)
+        else
+            warn("[AeroRespawn] Failed to fetch icon:", iconName)
+            return "rbxassetid://3926305904"
+        end
+    end
+    
+    return getcustomasset(filePath)
+end
+
+-- Drag functionality
+function Utility.Drag(frame, handle)
+    local dragging, dragInput, dragStart, startPos
+    
+    handle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or 
+           input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = frame.Position
+            
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+    
+    handle.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement or 
+           input.UserInputType == Enum.UserInputType.Touch then
+            dragInput = input
+        end
+    end)
+    
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then
+            local delta = input.Position - dragStart
+            Utility.Tween(frame, {
+                Position = UDim2.new(
+                    startPos.X.Scale,
+                    startPos.X.Offset + delta.X,
+                    startPos.Y.Scale,
+                    startPos.Y.Offset + delta.Y
+                )
+            }, 0.1)
+        end
+    end)
+end
+
+--// 5.0 GLOBAL STATE
+local State = {
+    Window = nil,
+    Sidebar = nil,
+    Content = nil,
+    NotifyContainer = nil,
+    ActiveTab = nil,
+    SidebarCollapsed = false,
+    Tabs = {},
+}
+
+--// 6.0 TAB CLASS
+local TabClass = {}
+TabClass.__index = TabClass
+
+function TabClass:AddSection(text)
+    local section = Utility.Create("Frame", {
+        Parent = self.Container,
+        Size = UDim2.new(1, 0, 0, 40),
+        BackgroundTransparency = 1,
+    })
+    
+    Utility.Create("TextLabel", {
+        Parent = section,
+        Text = text:upper(),
+        TextSize = Config.FontSizes.caption,
+        TextColor3 = Theme:Get("accent"),
+        Font = Enum.Font.GothamBold,
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, -Config.Spacing.medium, 1, 0),
+        Position = UDim2.new(0, Config.Spacing.medium, 0, 0),
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Bottom,
+    })
+    
+    -- Divider line
+    Utility.Create("Frame", {
+        Parent = section,
+        Size = UDim2.new(1, -Config.Spacing.medium * 2, 0, 1),
+        Position = UDim2.new(0, Config.Spacing.medium, 1, -8),
+        BackgroundColor3 = Theme:Get("divider"),
+        BackgroundTransparency = 0.5,
+        BorderSizePixel = 0,
+    })
+    
+    return section
+end
+
+function TabClass:AddButton(text, callback)
+    local container = Utility.CreateGlassPanel(self.Container, "surface")
+    container.Size = UDim2.new(1, 0, 0, Config.MinTouchTarget)
+    
+    Utility.Create("UICorner", {
+        Parent = container,
+        CornerRadius = UDim.new(0, 8),
+    })
+    
+    local button = Utility.Create("TextButton", {
+        Parent = container,
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1,
+        Text = text,
+        TextColor3 = Theme:Get("textPrimary"),
+        Font = Config.FontFamily,
+        TextSize = Config.FontSizes.body,
+        AutoButtonColor = false,
+    })
+    
+    -- Hover effect
+    button.MouseEnter:Connect(function()
+        Utility.Tween(container, {
+            BackgroundTransparency = Theme:Get("glassHighlight")
+        })
+    end)
+    
+    button.MouseLeave:Connect(function()
+        Utility.Tween(container, {
+            BackgroundTransparency = Theme:Get("glassTransparency")
+        })
+    end)
+    
+    -- Click effect
+    button.Activated:Connect(function()
+        Utility.Tween(button, {TextSize = Config.FontSizes.body - 2}, 0.1)
+        task.wait(0.1)
+        Utility.Tween(button, {TextSize = Config.FontSizes.body}, 0.1)
+        
+        if callback then
+            callback()
+        end
+    end)
+    
+    return button
+end
+
+function TabClass:AddToggle(text, default, callback)
+    local state = default or false
+    
+    local container = Utility.CreateGlassPanel(self.Container, "surface")
+    container.Size = UDim2.new(1, 0, 0, Config.MinTouchTarget)
+    
+    Utility.Create("UICorner", {
+        Parent = container,
+        CornerRadius = UDim.new(0, 8),
+    })
+    
+    local label = Utility.Create("TextLabel", {
+        Parent = container,
+        Text = text,
+        TextColor3 = Theme:Get("textPrimary"),
+        Font = Config.FontFamily,
+        TextSize = Config.FontSizes.body,
+        BackgroundTransparency = 1,
+        Size = UDim2.new(0.7, 0, 1, 0),
+        Position = UDim2.new(0, Config.Spacing.medium, 0, 0),
+        TextXAlignment = Enum.TextXAlignment.Left,
+    })
+    
+    -- Toggle background
+    local toggleBg = Utility.Create("Frame", {
+        Parent = container,
+        Size = UDim2.new(0, 52, 0, 28),
+        Position = UDim2.new(1, -64, 0.5, -14),
+        BackgroundColor3 = state and Theme:Get("accent") or Theme:Get("border"),
+        BorderSizePixel = 0,
+    })
+    
+    Utility.Create("UICorner", {
+        Parent = toggleBg,
+        CornerRadius = UDim.new(1, 0),
+    })
+    
+    -- Toggle knob
+    local knob = Utility.Create("Frame", {
+        Parent = toggleBg,
+        Size = UDim2.new(0, 22, 0, 22),
+        Position = state and UDim2.new(1, -25, 0.5, -11) or UDim2.new(0, 3, 0.5, -11),
+        BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+        BorderSizePixel = 0,
+    })
+    
+    Utility.Create("UICorner", {
+        Parent = knob,
+        CornerRadius = UDim.new(1, 0),
+    })
+    
+    local button = Utility.Create("TextButton", {
+        Parent = container,
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1,
+        Text = "",
+    })
+    
+    button.Activated:Connect(function()
+        state = not state
+        
+        Utility.Tween(toggleBg, {
+            BackgroundColor3 = state and Theme:Get("accent") or Theme:Get("border")
+        })
+        
+        Utility.Tween(knob, {
+            Position = state and UDim2.new(1, -25, 0.5, -11) or UDim2.new(0, 3, 0.5, -11)
+        })
+        
+        if callback then
+            callback(state)
+        end
+    end)
+    
+    return container
+end
+
+function TabClass:AddSlider(text, options, callback)
+    local min = options.Min or 0
+    local max = options.Max or 100
+    local default = options.Default or min
+    local value = default
+    
+    local container = Utility.CreateGlassPanel(self.Container, "surface")
+    container.Size = UDim2.new(1, 0, 0, 70)
+    
+    Utility.Create("UICorner", {
+        Parent = container,
+        CornerRadius = UDim.new(0, 8),
+    })
+    
+    local label = Utility.Create("TextLabel", {
+        Parent = container,
+        Text = text,
+        TextColor3 = Theme:Get("textPrimary"),
+        Font = Config.FontFamily,
+        TextSize = Config.FontSizes.body,
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, -Config.Spacing.large, 0, 24),
+        Position = UDim2.new(0, Config.Spacing.medium, 0, Config.Spacing.small),
+        TextXAlignment = Enum.TextXAlignment.Left,
+    })
+    
+    local valueLabel = Utility.Create("TextLabel", {
+        Parent = container,
+        Text = tostring(default),
+        TextColor3 = Theme:Get("accent"),
+        Font = Enum.Font.GothamBold,
+        TextSize = Config.FontSizes.body,
+        BackgroundTransparency = 1,
+        Size = UDim2.new(0, 60, 0, 24),
+        Position = UDim2.new(1, -72, 0, Config.Spacing.small),
+        TextXAlignment = Enum.TextXAlignment.Right,
+    })
+    
+    -- Slider track
+    local track = Utility.Create("Frame", {
+        Parent = container,
+        Size = UDim2.new(1, -Config.Spacing.large * 2, 0, 4),
+        Position = UDim2.new(0, Config.Spacing.medium, 0, 45),
+        BackgroundColor3 = Theme:Get("border"),
+        BorderSizePixel = 0,
+    })
+    
+    Utility.Create("UICorner", {
+        Parent = track,
+        CornerRadius = UDim.new(1, 0),
+    })
+    
+    -- Fill
+    local fill = Utility.Create("Frame", {
+        Parent = track,
+        Size = UDim2.new((default - min) / (max - min), 0, 1, 0),
+        BackgroundColor3 = Theme:Get("accent"),
+        BorderSizePixel = 0,
+    })
+    
+    Utility.Create("UICorner", {
+        Parent = fill,
+        CornerRadius = UDim.new(1, 0),
+    })
+    
+    -- Interaction button
+    local trigger = Utility.Create("TextButton", {
+        Parent = track,
+        Size = UDim2.new(1, 0, 5, 0),
+        Position = UDim2.new(0, 0, -2, 0),
+        BackgroundTransparency = 1,
+        Text = "",
+    })
+    
+    local dragging = false
+    
+    trigger.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or
+           input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+        end
+    end)
+    
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or
+           input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+    
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or
+                        input.UserInputType == Enum.UserInputType.Touch) then
+            local sizeX = track.AbsoluteSize.X
+            local mousePos = input.Position.X - track.AbsolutePosition.X
+            local percent = math.clamp(mousePos / sizeX, 0, 1)
+            
+            value = math.floor(min + (max - min) * percent)
+            fill.Size = UDim2.new(percent, 0, 1, 0)
+            valueLabel.Text = tostring(value)
+            
+            if callback then
+                callback(value)
+            end
+        end
+    end)
+    
+    return container
+end
+
+function TabClass:AddDropdown(text, items, callback)
+    local isOpen = false
+    local current = items[1] or "Select"
+    
+    local container = Utility.CreateGlassPanel(self.Container, "surface")
+    container.Size = UDim2.new(1, 0, 0, Config.MinTouchTarget)
+    container.ZIndex = 2
+    
+    Utility.Create("UICorner", {
+        Parent = container,
+        CornerRadius = UDim.new(0, 8),
+    })
+    
+    local label = Utility.Create("TextLabel", {
+        Parent = container,
+        Text = text,
+        TextColor3 = Theme:Get("textPrimary"),
+        Font = Config.FontFamily,
+        TextSize = Config.FontSizes.body,
+        BackgroundTransparency = 1,
+        Size = UDim2.new(0.5, 0, 1, 0),
+        Position = UDim2.new(0, Config.Spacing.medium, 0, 0),
+        TextXAlignment = Enum.TextXAlignment.Left,
+    })
+    
+    local display = Utility.Create("TextLabel", {
+        Parent = container,
+        Text = current .. " ▼",
+        TextColor3 = Theme:Get("textSecondary"),
+        Font = Config.FontFamily,
+        TextSize = Config.FontSizes.body,
+        BackgroundTransparency = 1,
+        Size = UDim2.new(0.5, -Config.Spacing.medium * 2, 1, 0),
+        Position = UDim2.new(0.5, Config.Spacing.medium, 0, 0),
+        TextXAlignment = Enum.TextXAlignment.Right,
+    })
+    
+    local button = Utility.Create("TextButton", {
+        Parent = container,
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1,
+        Text = "",
+    })
+    
+    local list = Utility.CreateGlassPanel(container, "surfaceLight")
+    list.Size = UDim2.new(1, 0, 0, 0)
+    list.Position = UDim2.new(0, 0, 1, 4)
+    list.Visible = false
+    list.ZIndex = 10
+    
+    Utility.Create("UICorner", {
+        Parent = list,
+        CornerRadius = UDim.new(0, 8),
+    })
+    
+    Utility.Create("UIListLayout", {
+        Parent = list,
+        SortOrder = Enum.SortOrder.LayoutOrder,
+    })
+    
+    button.Activated:Connect(function()
+        isOpen = not isOpen
+        list.Visible = isOpen
+        display.Text = current .. (isOpen and " ▲" or " ▼")
+        
+        if isOpen then
+            list:ClearAllChildren()
+            
+            local layout = Utility.Create("UIListLayout", {
+                Parent = list,
+                SortOrder = Enum.SortOrder.LayoutOrder,
+            })
+            
+            for _, item in ipairs(items) do
+                local itemBtn = Utility.Create("TextButton", {
+                    Parent = list,
+                    Size = UDim2.new(1, 0, 0, 40),
+                    BackgroundTransparency = 1,
+                    Text = item,
+                    TextColor3 = (item == current) and Theme:Get("accent") or Theme:Get("textPrimary"),
+                    Font = Config.FontFamily,
+                    TextSize = Config.FontSizes.body,
+                    ZIndex = 11,
+                })
+                
+                itemBtn.Activated:Connect(function()
+                    current = item
+                    display.Text = current .. " ▼"
+                    
+                    if callback then
+                        callback(item)
+                    end
+                    
+                    isOpen = false
+                    list.Visible = false
+                    Utility.Tween(list, {Size = UDim2.new(1, 0, 0, 0)})
+                end)
+            end
+            
+            local height = math.min(#items * 40, 200)
+            Utility.Tween(list, {Size = UDim2.new(1, 0, 0, height)})
+        else
+            Utility.Tween(list, {Size = UDim2.new(1, 0, 0, 0)})
+        end
+    end)
+    
+    return container
+end
+
+--// 7.0 CORE FUNCTIONS
+
+function AeroRespawn:AddTab(name, iconName)
+    local tab = {
+        Name = name,
+        Elements = {},
+    }
+    
+    -- Tab button in sidebar
+    local button = Utility.Create("TextButton", {
+        Parent = State.Sidebar,
+        Size = UDim2.new(1, 0, 0, Config.TabHeight),
+        BackgroundTransparency = 1,
+        Text = "",
+        AutoButtonColor = false,
+    })
+    
+    -- Icon
+    local icon = Utility.Create("ImageLabel", {
+        Parent = button,
+        BackgroundTransparency = 1,
+        Size = UDim2.new(0, 28, 0, 28),
+        Position = UDim2.new(0.5, -14, 0.5, -14),
+        Image = Utility.GetIcon(iconName or "home"),
+        ImageColor3 = Theme:Get("textSecondary"),
+    })
+    
+    -- Label (hidden when collapsed)
+    local label = Utility.Create("TextLabel", {
+        Parent = button,
+        Size = UDim2.new(1, -80, 1, 0),
+        Position = UDim2.new(0, 72, 0, 0),
+        BackgroundTransparency = 1,
+        Text = name,
+        Font = Config.FontFamily,
+        TextSize = Config.FontSizes.body,
+        TextColor3 = Theme:Get("textSecondary"),
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTransparency = State.SidebarCollapsed and 1 or 0,
+    })
+    
+    -- Accent indicator
+    local indicator = Utility.Create("Frame", {
+        Parent = button,
+        Size = UDim2.new(0, 4, 0.6, 0),
+        Position = UDim2.new(0, 0, 0.2, 0),
+        BackgroundColor3 = Theme:Get("accent"),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+    })
+    
+    -- Page container
+    local page = Utility.Create("ScrollingFrame", {
+        Parent = State.Content,
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1,
+        Visible = false,
+        ScrollBarThickness = 4,
+        ScrollBarImageColor3 = Theme:Get("accent"),
+        ScrollBarImageTransparency = 0.5,
+        CanvasSize = UDim2.new(0, 0, 0, 0),
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+    })
+    
+    Utility.Create("UIPadding", {
+        Parent = page,
+        PaddingAll = UDim.new(0, Config.Spacing.medium),
+    })
+    
+    local layout = Utility.Create("UIListLayout", {
+        Parent = page,
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, Config.Spacing.small),
+    })
+    
+    -- Tab selection logic
+    button.Activated:Connect(function()
+        -- Deselect previous
+        if State.ActiveTab then
+            State.ActiveTab.Page.Visible = false
+            Utility.Tween(State.ActiveTab.Icon, {
+                ImageColor3 = Theme:Get("textSecondary")
+            })
+            Utility.Tween(State.ActiveTab.Indicator, {
+                BackgroundTransparency = 1
+            })
+            Utility.Tween(State.ActiveTab.Label, {
+                TextColor3 = Theme:Get("textSecondary")
+            })
+        end
+        
+        -- Select new
+        State.ActiveTab = {
+            Page = page,
+            Icon = icon,
+            Indicator = indicator,
+            Label = label,
+        }
+        
+        page.Visible = true
+        
+        -- Slide in animation
+        page.Position = UDim2.new(0, 30, 0, 0)
+        Utility.Tween(page, {
+            Position = UDim2.new(0, 0, 0, 0)
+        })
+        
+        Utility.Tween(icon, {
+            ImageColor3 = Theme:Get("accent")
+        })
+        
+        Utility.Tween(indicator, {
+            BackgroundTransparency = 0
+        })
+        
+        Utility.Tween(label, {
+            TextColor3 = Theme:Get("textPrimary")
+        })
+    end)
+    
+    -- Store tab
+    setmetatable(tab, TabClass)
+    tab.Container = page
+    tab.Button = button
+    tab.Label = label
+    table.insert(State.Tabs, tab)
+    
+    return tab
+end
+
+function AeroRespawn:ToggleSidebar()
+    State.SidebarCollapsed = not State.SidebarCollapsed
+    
+    local targetWidth = State.SidebarCollapsed and 
+        Config.SidebarCollapsedWidth or 
+        Config.SidebarExpandedWidth
+    
+    -- Animate sidebar
+    Utility.Tween(State.Sidebar, {
+        Size = UDim2.new(0, targetWidth, 1, -41)
+    })
+    
+    -- Animate content area
+    Utility.Tween(State.Content, {
+        Size = UDim2.new(1, -targetWidth, 1, -41),
+        Position = UDim2.new(0, targetWidth, 0, 41)
+    })
+    
+    -- Fade labels
+    for _, tab in ipairs(State.Tabs) do
+        if tab.Label then
+            Utility.Tween(tab.Label, {
+                TextTransparency = State.SidebarCollapsed and 1 or 0
+            })
+        end
+    end
+end
+
+function AeroRespawn:Notify(options)
+    local notif = Utility.CreateGlassPanel(State.NotifyContainer, "surface")
+    notif.Size = UDim2.new(1, 0, 0, 70)
+    
+    Utility.Create("UICorner", {
+        Parent = notif,
+        CornerRadius = UDim.new(0, 8),
+    })
+    
+    -- Status bar
+    local statusColor = Theme:Get("accent")
+    if options.Type == "Error" then
+        statusColor = Theme:Get("error")
+    elseif options.Type == "Warning" then
+        statusColor = Theme:Get("warning")
+    elseif options.Type == "Success" then
+        statusColor = Theme:Get("success")
+    end
+    
+    local bar = Utility.Create("Frame", {
+        Parent = notif,
+        Size = UDim2.new(0, 4, 1, 0),
+        BackgroundColor3 = statusColor,
+        BorderSizePixel = 0,
+    })
+    
+    Utility.Create("UICorner", {
+        Parent = bar,
+        CornerRadius = UDim.new(0, 8),
+    })
+    
+    -- Title
+    Utility.Create("TextLabel", {
+        Parent = notif,
+        Text = options.Title or "Notification",
+        TextColor3 = Theme:Get("textPrimary"),
+        Font = Enum.Font.GothamBold,
+        TextSize = Config.FontSizes.subtitle,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0, 16, 0, 8),
+        Size = UDim2.new(1, -32, 0, 20),
+        TextXAlignment = Enum.TextXAlignment.Left,
+    })
+    
+    -- Message
+    Utility.Create("TextLabel", {
+        Parent = notif,
+        Text = options.Text or "...",
+        TextColor3 = Theme:Get("textSecondary"),
+        Font = Config.FontFamily,
+        TextSize = Config.FontSizes.body,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0, 16, 0, 32),
+        Size = UDim2.new(1, -32, 0, 30),
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextWrapped = true,
+    })
+    
+    -- Slide in animation
+    notif.Position = UDim2.new(1, 0, 0, 0)
+    Utility.Tween(notif, {
+        Position = UDim2.new(0, 0, 0, 0)
+    })
+    
+    -- Auto dismiss
+    task.delay(options.Duration or 3, function()
+        Utility.Tween(notif, {
+            Position = UDim2.new(1.2, 0, 0, 0)
+        })
+        task.wait(0.3)
+        notif:Destroy()
+    end)
+end
+
+function AeroRespawn:SetTheme(mode)
+    Theme:SetMode(mode)
+    -- Note: Full theme refresh would require rebuilding UI
+    -- For live updates, implement a theme change signal system
+end
+
+function AeroRespawn:SetAccent(color)
+    Theme:SetAccent(color)
+    -- Same as above - would trigger UI refresh
+end
+
+--// 8.0 INITIALIZATION
+
+function AeroRespawn.init(playerGui)
+    if State.Window then
+        warn("[AeroRespawn] Already initialized!")
+        return AeroRespawn
+    end
+    
+    -- Main ScreenGui
+    local gui = Utility.Create("ScreenGui", {
+        Parent = playerGui,
+        Name = "AeroRespawnUI",
+        ResetOnSpawn = false,
+        ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+    })
+    
+    -- Main window
+    local window = Utility.CreateGlassPanel(gui, "surface")
+    window.Size = UDim2.fromOffset(700, 500)
+    window.Position = UDim2.fromScale(0.5, 0.5)
+    window.AnchorPoint = Vector2.new(0.5, 0.5)
+    
+    Utility.Create("UICorner", {
+        Parent = window,
+        CornerRadius = UDim.new(0, 8),
+    })
+    
+    -- Outer glow (glass accent)
+    Utility.Create("UIStroke", {
+        Parent = window,
+        Color = Theme:Get("accent"),
+        Transparency = 0.7,
+        Thickness = 2,
+    })
+    
+    -- Drop shadow
+    Utility.Create("ImageLabel", {
+        Parent = window,
+        Image = "rbxassetid://6015897843",
+        ImageColor3 = Color3.new(0, 0, 0),
+        ImageTransparency = 0.3,
+        Size = UDim2.new(1, 60, 1, 60),
+        Position = UDim2.new(0, -30, 0, -30),
+        BackgroundTransparency = 1,
+        ScaleType = Enum.ScaleType.Slice,
+        SliceCenter = Rect.new(49, 49, 450, 450),
+        ZIndex = -1,
+    })
+    
+    -- Topbar
+    local topbar = Utility.CreateGlassPanel(window, "sidebarGlass")
+    topbar.Size = UDim2.new(1, 0, 0, 40)
+    topbar.BackgroundTransparency = Theme:Get("glassHighlight")
+    
+    Utility.Create("UICorner", {
+        Parent = topbar,
+        CornerRadius = UDim.new(0, 8),
+    })
+    
+    -- Topbar straightener (removes bottom corners)
+    local topStraight = Utility.Create("Frame", {
+        Parent = topbar,
+        Size = UDim2.new(1, 0, 0, 10),
+        Position = UDim2.new(0, 0, 1, -10),
+        BackgroundColor3 = Theme:Get("sidebarGlass"),
+        BackgroundTransparency = Theme:Get("glassHighlight"),
+        BorderSizePixel = 0,
+    })
+    
+    -- Topbar divider
+    Utility.Create("Frame", {
+        Parent = topbar,
+        Size = UDim2.new(1, 0, 0, 1),
+        Position = UDim2.new(0, 0, 1, 0),
+        BackgroundColor3 = Theme:Get("border"),
+        BackgroundTransparency = 0.3,
+        BorderSizePixel = 0,
+    })
+    
+    -- Title
+    Utility.Create("TextLabel", {
+        Parent = topbar,
+        Text = "AERO RESPAWN // GLASS",
+        TextColor3 = Theme:Get("accent"),
+        Font = Enum.Font.GothamBold,
+        TextSize = Config.FontSizes.subtitle,
+        BackgroundTransparency = 1,
+        Size = UDim2.new(0.5, 0, 1, 0),
+        Position = UDim2.new(0, Config.Spacing.medium, 0, 0),
+        TextXAlignment = Enum.TextXAlignment.Left,
+    })
+    
+    -- Make draggable
+    Utility.Drag(window, topbar)
+    
+    -- Close button
+    local closeBtn = Utility.Create("TextButton", {
+        Parent = topbar,
+        Text = "×",
+        TextColor3 = Theme:Get("textPrimary"),
+        TextSize = 28,
+        Font = Enum.Font.GothamBold,
+        BackgroundTransparency = 1,
+        Size = UDim2.new(0, 40, 1, 0),
+        Position = UDim2.new(1, -40, 0, 0),
+    })
+    
+    closeBtn.Activated:Connect(function()
+        Utility.Tween(window, {
+            Size = UDim2.fromOffset(0, 0)
+        })
+        task.wait(0.3)
+        gui:Destroy()
+    end)
+    
+    -- Sidebar toggle button
+    local sidebarToggle = Utility.Create("TextButton", {
+        Parent = topbar,
+        Text = "☰",
+        TextColor3 = Theme:Get("textPrimary"),
+        TextSize = 20,
+        Font = Enum.Font.GothamBold,
+        BackgroundTransparency = 1,
+        Size = UDim2.new(0, 40, 1, 0),
+        Position = UDim2.new(1, -80, 0, 0),
+    })
+    
+    sidebarToggle.Activated:Connect(function()
+        AeroRespawn:ToggleSidebar()
+    end)
+    
+    -- Sidebar
+    local sidebar = Utility.CreateGlassPanel(window, "sidebar")
+    sidebar.Size = UDim2.new(0, Config.SidebarExpandedWidth, 1, -41)
+    sidebar.Position = UDim2.new(0, 0, 0, 41)
+    sidebar.BackgroundTransparency = Theme:Get("glassDeep")
+    
+    Utility.Create("UICorner", {
+        Parent = sidebar,
+        CornerRadius = UDim.new(0, 8),
+    })
+    
+    -- Sidebar bottom straightener
+    local sidebarStraight = Utility.Create("Frame", {
+        Parent = sidebar,
+        Size = UDim2.new(1, 0, 0, 10),
+        Position = UDim2.new(0, 0, 0, 0),
+        BackgroundColor3 = Theme:Get("sidebar"),
+        BackgroundTransparency = Theme:Get("glassDeep"),
+        BorderSizePixel = 0,
+    })
+    
+    Utility.Create("UIListLayout", {
+        Parent = sidebar,
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, Config.Spacing.tiny),
+    })
+    
+    Utility.Create("UIPadding", {
+        Parent = sidebar,
+        PaddingTop = UDim.new(0, Config.Spacing.medium),
+        PaddingLeft = UDim.new(0, Config.Spacing.tiny),
+        PaddingRight = UDim.new(0, Config.Spacing.tiny),
+    })
+    
+    -- Content area
+    local content = Utility.Create("Frame", {
+        Parent = window,
+        Size = UDim2.new(1, -Config.SidebarExpandedWidth, 1, -41),
+        Position = UDim2.new(0, Config.SidebarExpandedWidth, 0, 41),
+        BackgroundTransparency = 1,
+    })
+    
+    -- Notification container
+    local notifyContainer = Utility.Create("Frame", {
+        Parent = gui,
+        Size = UDim2.new(0, 300, 1, 0),
+        Position = UDim2.new(1, -320, 0, 20),
+        BackgroundTransparency = 1,
+    })
+    
+    Utility.Create("UIListLayout", {
+        Parent = notifyContainer,
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        VerticalAlignment = Enum.VerticalAlignment.Bottom,
+        Padding = UDim.new(0, Config.Spacing.small),
+    })
+    
+    -- Store state
+    State.Window = window
+    State.Sidebar = sidebar
+    State.Content = content
+    State.NotifyContainer = notifyContainer
+    
+    -- Entrance animation
+    window.Size = UDim2.fromOffset(0, 0)
+    Utility.Tween(window, {
+        Size = UDim2.fromOffset(700, 500)
+    }, 0.4, Enum.EasingStyle.Back)
+    
+    return AeroRespawn
+end
+
+return AeroRespawn
