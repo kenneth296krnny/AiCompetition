@@ -1,0 +1,371 @@
+--[[
+    PROJECT: RESPAWN (v6.0 - MOBILE DELTA)
+    Status: DRAGGABLE (TOUCH/MOUSE) + TABS FIXED
+    
+    Changelog:
+    1. Drag System: Rewritten using Delta (Position - Start) logic.
+       - Supports Enum.UserInputType.Touch (Mobile)
+       - Supports Enum.UserInputType.MouseButton1 (PC)
+    2. Tabs: Auto-selects the first tab added so the UI isn't blank.
+    3. Icons: Added safety checks for mobile executors.
+]]
+
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+
+local Respawn = {}
+Respawn.__index = Respawn
+
+--// 1.0 CONFIG
+local Config = {
+    Folder = "RespawnIcons", -- Folder in workspace
+    TweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+}
+
+local Theme = {
+    Window      = Color3.fromRGB(15, 15, 15),
+    Sidebar     = Color3.fromRGB(10, 10, 10),
+    Topbar      = Color3.fromRGB(12, 12, 12),
+    Lines       = Color3.fromRGB(35, 35, 35),
+    Accent      = Color3.fromRGB(0, 122, 204),
+    Text        = Color3.fromRGB(255, 255, 255),
+    TextDim     = Color3.fromRGB(150, 150, 150),
+    Hover       = Color3.fromRGB(25, 25, 25),
+    Section     = Color3.fromRGB(20, 20, 20),
+}
+
+--// 2.0 UTILITY
+local Utility = {}
+
+function Utility.Create(class, props, children)
+    local inst = Instance.new(class)
+    for k, v in pairs(props or {}) do inst[k] = v end
+    for _, child in ipairs(children or {}) do child.Parent = inst end
+    return inst
+end
+
+function Utility.Tween(inst, props)
+    TweenService:Create(inst, Config.TweenInfo, props):Play()
+end
+
+-- [ CUSTOM DELTA DRAG (MOBILE SUPPORT) ] --
+function Utility.EnableDrag(frame, interactable)
+    local dragging = false
+    local dragInput = nil
+    local dragStart = nil
+    local startPos = nil
+    
+    -- Detect Touch or Click
+    interactable.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = frame.Position
+            
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+    
+    -- Capture the moving input
+    interactable.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+            dragInput = input
+        end
+    end)
+    
+    -- Apply the math
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then
+            local delta = input.Position - dragStart
+            local newPos = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + delta.X,
+                startPos.Y.Scale, startPos.Y.Offset + delta.Y
+            )
+            -- Instant update for responsiveness on mobile, or Tween for smooth
+            -- Using tween here for smoothness
+            TweenService:Create(frame, TweenInfo.new(0.05), {Position = newPos}):Play()
+        end
+    end)
+end
+
+function Utility.GetIcon(name)
+    if not name then return "" end
+    if string.find(name, "rbxassetid") then return name end
+    
+    -- Safety for Mobile Executors (Delta/Arceus)
+    if not makefolder or not writefile then return "rbxassetid://0" end
+    
+    local fileName = name .. ".png"
+    local path = Config.Folder .. "/" .. fileName
+    local url = "https://raw.githubusercontent.com/latte-soft/lucide-roblox/master/icons/compiled/48px/" .. fileName
+    
+    -- Try/Catch for filesystem
+    local success, err = pcall(function()
+        if not isfolder(Config.Folder) then makefolder(Config.Folder) end
+        if not isfile(path) then
+            local content = game:HttpGet(url)
+            writefile(path, content)
+        end
+    end)
+    
+    if success then
+        return getcustomasset(path)
+    else
+        return "rbxassetid://0" -- Fail safely
+    end
+end
+
+--// 3.0 STATE
+local UI = {
+    Window = nil,
+    Sidebar = nil,
+    Container = nil,
+    NotifyList = nil,
+    ActiveTab = nil,
+    TabCount = 0
+}
+
+--// 4.0 INITIALIZER
+function Respawn.init(targetGui)
+    -- Reset if exists
+    if targetGui:FindFirstChild("RespawnMobile") then targetGui.RespawnMobile:Destroy() end
+    
+    local gui = Utility.Create("ScreenGui", {
+        Parent = targetGui, Name = "RespawnMobile", 
+        ResetOnSpawn = false, ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    })
+    
+    -- Main Window
+    local win = Utility.Create("Frame", {
+        Parent = gui, Size = UDim2.fromOffset(600, 350),
+        Position = UDim2.fromScale(0.5, 0.5), AnchorPoint = Vector2.new(0.5, 0.5),
+        BackgroundColor3 = Theme.Window, BorderSizePixel = 0
+    })
+    Utility.Create("UICorner", {Parent = win, CornerRadius = UDim.new(0, 8)})
+    Utility.Create("UIStroke", {Parent = win, Color = Theme.Lines, Thickness = 1})
+    
+    -- Topbar (The Handle)
+    local top = Utility.Create("Frame", {
+        Parent = win, Size = UDim2.new(1, 0, 0, 45),
+        BackgroundColor3 = Theme.Topbar, BorderSizePixel = 0,
+        Active = true -- Important for touch
+    })
+    Utility.Create("UICorner", {Parent = top, CornerRadius = UDim.new(0, 8)})
+    -- Flatten bottom of topbar
+    Utility.Create("Frame", {
+        Parent = top, Size = UDim2.new(1, 0, 0, 10), Position = UDim2.new(0,0,1,-10),
+        BackgroundColor3 = Theme.Topbar, BorderSizePixel = 0
+    })
+    
+    Utility.Create("TextLabel", {
+        Parent = top, Text = "RESPAWN // MOBILE", TextColor3 = Theme.Text,
+        Font = Enum.Font.GothamBold, TextSize = 16, BackgroundTransparency = 1,
+        Size = UDim2.new(0.5, 0, 1, 0), Position = UDim2.new(0, 15, 0, 0),
+        TextXAlignment = Enum.TextXAlignment.Left
+    })
+    
+    -- Close Button
+    local close = Utility.Create("TextButton", {
+        Parent = top, Size = UDim2.new(0, 45, 1, 0), Position = UDim2.new(1, -45, 0, 0),
+        BackgroundTransparency = 1, Text = "X", TextColor3 = Theme.Text, TextSize = 18, Font = Enum.Font.GothamBold
+    })
+    close.Activated:Connect(function() gui:Destroy() end)
+    
+    -- Enable Dragging
+    Utility.EnableDrag(win, top)
+    
+    -- Sidebar
+    local side = Utility.Create("ScrollingFrame", {
+        Parent = win, Size = UDim2.new(0, 160, 1, -46), Position = UDim2.new(0, 0, 0, 46),
+        BackgroundColor3 = Theme.Sidebar, BorderSizePixel = 0, ScrollBarThickness = 0
+    })
+    Utility.Create("UICorner", {Parent = side, CornerRadius = UDim.new(0, 8)})
+    Utility.Create("Frame", {Parent = side, Size = UDim2.new(0,10,1,0), Position = UDim2.new(1,-10,0,0), BackgroundColor3 = Theme.Sidebar, BorderSizePixel=0})
+    
+    Utility.Create("UIListLayout", {Parent = side, SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 5)})
+    Utility.Create("UIPadding", {Parent = side, PaddingTop = UDim.new(0, 10), PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10)})
+    
+    -- Divider
+    Utility.Create("Frame", {
+        Parent = win, Size = UDim2.new(0, 1, 1, -46), Position = UDim2.new(0, 160, 0, 46),
+        BackgroundColor3 = Theme.Lines, BorderSizePixel = 0
+    })
+    
+    -- Container
+    local container = Utility.Create("Frame", {
+        Parent = win, Size = UDim2.new(1, -161, 1, -46), Position = UDim2.new(0, 161, 0, 46),
+        BackgroundTransparency = 1, ClipsDescendants = true
+    })
+    
+    UI.Window = win
+    UI.Sidebar = side
+    UI.Container = container
+    UI.NotifyList = Utility.Create("Frame", {Parent = gui, Size = UDim2.new(0, 250, 1, 0), Position = UDim2.new(1, -260, 0, 20), BackgroundTransparency = 1})
+    Utility.Create("UIListLayout", {Parent = UI.NotifyList, VerticalAlignment = Enum.VerticalAlignment.Bottom, Padding = UDim.new(0, 5)})
+    
+    return Respawn
+end
+
+--// 5.0 COMPONENTS
+local TabClass = {}
+TabClass.__index = TabClass
+
+function Respawn:AddTab(name, iconName)
+    UI.TabCount = UI.TabCount + 1
+    local tabObj = {}
+    
+    -- 1. Create Sidebar Button
+    local btn = Utility.Create("TextButton", {
+        Parent = UI.Sidebar, Size = UDim2.new(1, 0, 0, 38),
+        BackgroundColor3 = Theme.Sidebar, AutoButtonColor = false, Text = ""
+    })
+    Utility.Create("UICorner", {Parent = btn, CornerRadius = UDim.new(0, 6)})
+    
+    local icon = Utility.Create("ImageLabel", {
+        Parent = btn, Size = UDim2.new(0, 20, 0, 20), Position = UDim2.new(0, 10, 0.5, -10),
+        BackgroundTransparency = 1, Image = Utility.GetIcon(iconName), ImageColor3 = Theme.TextDim
+    })
+    
+    local txt = Utility.Create("TextLabel", {
+        Parent = btn, Size = UDim2.new(1, -40, 1, 0), Position = UDim2.new(0, 38, 0, 0),
+        BackgroundTransparency = 1, Text = name, TextColor3 = Theme.TextDim,
+        Font = Enum.Font.GothamMedium, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left
+    })
+    
+    -- 2. Create Page (Hidden)
+    local page = Utility.Create("ScrollingFrame", {
+        Parent = UI.Container, Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1, Visible = false, ScrollBarThickness = 2,
+        ScrollBarImageColor3 = Theme.Accent, BorderSizePixel = 0,
+        AutomaticCanvasSize = Enum.AutomaticSize.Y
+    })
+    Utility.Create("UIPadding", {Parent = page, PaddingTop = UDim.new(0, 10), PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10), PaddingBottom = UDim.new(0, 10)})
+    Utility.Create("UIListLayout", {Parent = page, SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 8)})
+    
+    -- 3. Activation Function
+    local function Activate()
+        if UI.ActiveTab then
+            UI.ActiveTab.Page.Visible = false
+            Utility.Tween(UI.ActiveTab.Btn, {BackgroundColor3 = Theme.Sidebar})
+            Utility.Tween(UI.ActiveTab.Txt, {TextColor3 = Theme.TextDim})
+            Utility.Tween(UI.ActiveTab.Icon, {ImageColor3 = Theme.TextDim})
+        end
+        
+        UI.ActiveTab = {Page = page, Btn = btn, Txt = txt, Icon = icon}
+        page.Visible = true
+        Utility.Tween(btn, {BackgroundColor3 = Theme.Section})
+        Utility.Tween(txt, {TextColor3 = Theme.Text})
+        Utility.Tween(icon, {ImageColor3 = Theme.Accent})
+    end
+    
+    btn.Activated:Connect(Activate)
+    
+    -- 4. Auto-Select First Tab
+    if UI.TabCount == 1 then
+        Activate()
+    end
+    
+    setmetatable(tabObj, TabClass)
+    tabObj.Container = page
+    return tabObj
+end
+
+-- [ SECTION ]
+function TabClass:AddSection(text)
+    local frame = Utility.Create("Frame", {
+        Parent = self.Container, Size = UDim2.new(1, 0, 0, 30), BackgroundTransparency = 1
+    })
+    Utility.Create("TextLabel", {
+        Parent = frame, Text = text, TextColor3 = Theme.Accent,
+        Font = Enum.Font.GothamBold, TextSize = 12, BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 1, 0), TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Bottom
+    })
+end
+
+-- [ BUTTON ]
+function TabClass:AddButton(text, callback)
+    local btn = Utility.Create("TextButton", {
+        Parent = self.Container, Size = UDim2.new(1, 0, 0, 35),
+        BackgroundColor3 = Theme.Section, Text = text,
+        TextColor3 = Theme.Text, Font = Enum.Font.Gotham, TextSize = 13,
+        AutoButtonColor = false
+    })
+    Utility.Create("UICorner", {Parent = btn, CornerRadius = UDim.new(0, 6)})
+    Utility.Create("UIStroke", {Parent = btn, Color = Theme.Lines, Thickness = 1})
+    
+    btn.Activated:Connect(function()
+        if callback then callback() end
+        Utility.Tween(btn, {TextSize = 11})
+        task.wait(0.1)
+        Utility.Tween(btn, {TextSize = 13})
+    end)
+end
+
+-- [ TOGGLE ]
+function TabClass:AddToggle(text, default, callback)
+    local state = default or false
+    local btn = Utility.Create("TextButton", {
+        Parent = self.Container, Size = UDim2.new(1, 0, 0, 35),
+        BackgroundColor3 = Theme.Section, AutoButtonColor = false, Text = ""
+    })
+    Utility.Create("UICorner", {Parent = btn, CornerRadius = UDim.new(0, 6)})
+    Utility.Create("UIStroke", {Parent = btn, Color = Theme.Lines, Thickness = 1})
+    
+    Utility.Create("TextLabel", {
+        Parent = btn, Text = text, TextColor3 = Theme.Text,
+        Font = Enum.Font.Gotham, TextSize = 13, BackgroundTransparency = 1,
+        Size = UDim2.new(1, -40, 1, 0), Position = UDim2.new(0, 10, 0, 0),
+        TextXAlignment = Enum.TextXAlignment.Left
+    })
+    
+    local ind = Utility.Create("Frame", {
+        Parent = btn, Size = UDim2.new(0, 18, 0, 18), Position = UDim2.new(1, -28, 0.5, -9),
+        BackgroundColor3 = state and Theme.Accent or Theme.Window
+    })
+    Utility.Create("UICorner", {Parent = ind, CornerRadius = UDim.new(0, 4)})
+    
+    btn.Activated:Connect(function()
+        state = not state
+        Utility.Tween(ind, {BackgroundColor3 = state and Theme.Accent or Theme.Window})
+        if callback then callback(state) end
+    end)
+end
+
+-- [ NOTIFY ]
+function Respawn:Notify(opts)
+    local box = Utility.Create("Frame", {
+        Parent = UI.NotifyList, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundColor3 = Theme.Section, BackgroundTransparency = 0.1
+    })
+    Utility.Create("UICorner", {Parent = box, CornerRadius = UDim.new(0, 4)})
+    Utility.Create("UIStroke", {Parent = box, Color = Theme.Lines, Thickness = 1})
+    Utility.Create("UIPadding", {Parent = box, PaddingTop = UDim.new(0,10), PaddingBottom = UDim.new(0,10), PaddingLeft = UDim.new(0,10)})
+    
+    local t = Utility.Create("TextLabel", {
+        Parent = box, Text = opts.Title or "Alert", TextColor3 = Theme.Text,
+        Font = Enum.Font.GothamBold, TextSize = 14, BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, 15), TextXAlignment = Enum.TextXAlignment.Left
+    })
+    Utility.Create("TextLabel", {
+        Parent = box, Text = opts.Text or "Info", TextColor3 = Theme.TextDim,
+        Font = Enum.Font.Gotham, TextSize = 12, BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, 15), Position = UDim2.new(0,0,0,20),
+        TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true
+    })
+    
+    local bar = Utility.Create("Frame", {
+        Parent = box, Size = UDim2.new(0, 3, 1, -10), Position = UDim2.new(0,-10,0,5),
+        BackgroundColor3 = opts.Type == "Error" and Color3.fromRGB(255,80,80) or Theme.Accent
+    })
+    
+    task.delay(opts.Duration or 3, function() box:Destroy() end)
+end
+
+return Respawn
